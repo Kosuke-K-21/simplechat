@@ -1,7 +1,6 @@
 # lambda/index.py
 import json
 import os
-import urllib
 import urllib.request
 import boto3
 import re  # 正規表現モジュールをインポート
@@ -16,11 +15,6 @@ def extract_region_from_arn(arn):
         return match.group(1)
     return "us-east-1"  # デフォルト値
 
-# グローバル変数としてクライアントを初期化（初期値）
-bedrock_client = None
-
-# モデルID
-MODEL_ID = os.environ.get("MODEL_ID", "us.amazon.nova-lite-v1:0")
 
 def lambda_handler(event, context):
     try:
@@ -49,22 +43,22 @@ def lambda_handler(event, context):
         })
         
         # 会話履歴を含める
-        bedrock_messages = []
+        prompt = ""
         for msg in messages:
-            if msg["role"] == "user":
-                bedrock_messages.append({
-                    "role": "user",
-                    "content": [{"text": msg["content"]}]
-                })
-            elif msg["role"] == "assistant":
+            if msg["role"] == "user: ":
+                prompt += "## user: "
+            elif msg["role"] == "## assistant: ":
                 bedrock_messages.append({
                     "role": "assistant", 
                     "content": [{"text": msg["content"]}]
                 })
+            prompt += msg["content"] + "\n"
+        
+        prompt += "## assistant: "
         
         # invoke_model用のリクエストペイロード
         request_payload = {
-            "prompt": bedrock_messages,
+            "prompt": prompt,
             "max_new_tokens": 512,
             "do_sample": True,
             "temperature": 0.7,
@@ -72,32 +66,31 @@ def lambda_handler(event, context):
         }
         
         print("Calling API with payload:", json.dumps(request_payload))
-        
+
         # invoke_model APIを呼び出し
         response = urllib.request.Request(
-            url="https://c724-34-16-154-77.ngrok-free.app/generate",
-            data=json.dumps(request_payload).encode('utf-8'),
+            url="https://2e20-34-87-23-130.ngrok-free.app/generate",
+            data=json.dumps(request_payload).encode(),
             headers={
                 "Content-Type": "application/json"
-            },
-            method='POST'
+            }
         )
-        
-        # レスポンスを解析
-        response_body = json.loads(response['body'].read())
-        print("Response:", json.dumps(response_body, default=str))
-        
+
+        with urllib.request.urlopen(response) as res:
+            response_body = res.read()
+            response_body = json.loads(response_body.decode('utf-8'))
+
         # 応答の検証
         if not response_body.get('generated_text'):
             raise Exception("No response content from the model")
-        
-        # アシスタントの応答を取得
-        assistant_response = response_body['generated_text']
-        
+
+
+        generated_text = response_body.get('generated_text')
+                        
         # アシスタントの応答を会話履歴に追加
         messages.append({
             "role": "assistant",
-            "content": assistant_response
+            "content": generated_text
         })
         
         # 成功レスポンスの返却
@@ -111,7 +104,7 @@ def lambda_handler(event, context):
             },
             "body": json.dumps({
                 "success": True,
-                "response": assistant_response,
+                "response": generated_text,
                 "conversationHistory": messages
             })
         }
